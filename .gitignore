@@ -1,0 +1,7 @@
+build/
+build-vita/
+.DS_Store
+*.vpk
+*.self
+*.velf
+*.bak

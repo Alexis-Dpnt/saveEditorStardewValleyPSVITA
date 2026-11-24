@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<SaveGame>
+  <player>
+    <name>Alexis</name>
+    <farmName>Pelican</farmName>
+    <money>63000</money>
+    <maxStamina>300</maxStamina>
+    <maxHealth>999</maxHealth>
+    <farmingLevel>3</farmingLevel>
+    <miningLevel>2</miningLevel>
+    <foragingLevel>2</foragingLevel>
+    <fishingLevel>1</fishingLevel>
+    <combatLevel>1</combatLevel>
+  </player>
+  <dayOfMonth>25</dayOfMonth>
+  <currentSeason>summer</currentSeason>
+  <year>1</year>
+</SaveGame>
