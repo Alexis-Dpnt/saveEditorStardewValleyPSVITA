@@ -67,9 +67,22 @@ int main(int argc, char *argv[]) {
     }
 
     SaveData save;
-    char sample_path[512];
-    snprintf(sample_path, sizeof(sample_path), "%s/sample_save.xml", platform_get_saves_dir());
-    if (!save_data_load_xml(&save, sample_path)) {
+    bool loaded = false;
+    if (argc > 1) {
+        loaded = save_data_load_xml(&save, argv[1]);
+    }
+    if (!loaded) {
+        char vita_sample[512];
+        snprintf(vita_sample, sizeof(vita_sample), "%s/vita_pcse01235/EDWN_117938427/EDWN_117938427",
+                 platform_get_saves_dir());
+        loaded = save_data_load_xml(&save, vita_sample);
+    }
+    if (!loaded) {
+        char sample_path[512];
+        snprintf(sample_path, sizeof(sample_path), "%s/sample_save.xml", platform_get_saves_dir());
+        loaded = save_data_load_xml(&save, sample_path);
+    }
+    if (!loaded) {
         save_data_init_demo(&save);
     }
 
