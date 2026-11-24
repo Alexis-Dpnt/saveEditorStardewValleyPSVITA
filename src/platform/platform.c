@@ -1,7 +1,15 @@
+/*
+ * platform.c — Implémentation des fonctions spécifiques à la plateforme (macOS / PS Vita).
+ */
+
 #include "platform/platform.h"
 
 #include <stdio.h>
 
+/*
+ * Vérifie si un fichier existe et peut être ouvert en lecture.
+ * Utilisé sur macOS pour choisir une police disponible.
+ */
 static bool file_exists(const char *path) {
     FILE *f = fopen(path, "rb");
     if (f) {
@@ -11,6 +19,11 @@ static bool file_exists(const char *path) {
     return false;
 }
 
+/*
+ * Retourne le chemin du dossier des sauvegardes :
+ * - Sur PS Vita : dossier dédié sur la carte mémoire (ux0:data/...)
+ * - Sur macOS   : dossier local test_saves/ à la racine du projet
+ */
 const char *platform_get_saves_dir(void) {
 #ifdef PLATFORM_VITA
     return "ux0:data/StardewSaveEditor/saves";
@@ -19,6 +32,11 @@ const char *platform_get_saves_dir(void) {
 #endif
 }
 
+/*
+ * Retourne le chemin de la police TrueType utilisée par SDL2_ttf :
+ * - Sur PS Vita : police embarquée dans le .vpk (app0:assets/font.ttf)
+ * - Sur macOS   : assets/font.ttf si présente, sinon Arial ou Helvetica système
+ */
 const char *platform_get_font_path(void) {
 #ifdef PLATFORM_VITA
     return "app0:assets/font.ttf";
@@ -33,11 +51,17 @@ const char *platform_get_font_path(void) {
 #endif
 }
 
+/*
+ * Convertit un événement SDL (fermeture fenêtre, touche clavier ou bouton manette/Vita)
+ * en une action abstraite InputAction comprise par l'interface.
+ */
 InputAction platform_translate_event(const SDL_Event *event) {
+    /* Fermeture de la fenêtre (clic sur la croix rouge sur macOS) */
     if (event->type == SDL_QUIT) {
         return INPUT_QUIT;
     }
 
+    /* Entrées clavier (développement sur macOS) */
     if (event->type == SDL_KEYDOWN) {
         switch (event->key.keysym.sym) {
             case SDLK_UP:
@@ -72,6 +96,7 @@ InputAction platform_translate_event(const SDL_Event *event) {
         }
     }
 
+    /* Entrées manette / boutons physiques de la PS Vita */
     if (event->type == SDL_CONTROLLERBUTTONDOWN) {
         switch (event->cbutton.button) {
             case SDL_CONTROLLER_BUTTON_DPAD_UP:

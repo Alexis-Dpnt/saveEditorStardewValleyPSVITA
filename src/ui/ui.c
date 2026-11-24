@@ -1,36 +1,58 @@
+/*
+ * ui.c — Implémentation de l'interface utilisateur maison (SDL2 + SDL2_ttf).
+ * Gère les onglets, la navigation, l'édition des champs et le rendu 2D en 960x544.
+ */
+
 #include "ui/ui.h"
 
 #include <stdio.h>
 #include <string.h>
 
+/* Nombre total d'onglets affichés en haut de l'interface */
 #define TAB_COUNT 3
 
+/* Libellés des onglets dans l'ordre d'affichage */
 static const char *TAB_NAMES[TAB_COUNT] = {
     "Joueur",
     "Competences",
     "Ferme & Temps"
 };
 
+/*
+ * Retourne le nombre de lignes éditables dans l'onglet `tab`.
+ * À mettre à jour si tu ajoutes ou retires des champs dans un onglet.
+ */
 static int tab_row_count(int tab) {
     switch (tab) {
-        case 0: return 3; /* Argent, Energie max, Sante max */
-        case 1: return 5; /* Agriculture, Minage, Cueillette, Peche, Combat */
-        case 2: return 3; /* Jour, Saison, Annee */
+        case 0: return 3; /* Argent, Énergie max, Santé max */
+        case 1: return 5; /* Agriculture, Minage, Cueillette, Pêche, Combat */
+        case 2: return 3; /* Jour, Saison, Année */
         default: return 0;
     }
 }
 
+/*
+ * Borne un entier `v` entre `min_v` et `max_v` inclus.
+ * Empêche par exemple d'avoir de l'argent négatif ou un niveau > 10.
+ */
 static int clamp_int(int v, int min_v, int max_v) {
     if (v < min_v) return min_v;
     if (v > max_v) return max_v;
     return v;
 }
 
+/*
+ * Affiche un message temporaire en bas de l'écran pendant 3 secondes (3000 ms).
+ */
 static void set_status(UIState *ui, const char *msg) {
     snprintf(ui->status_msg, sizeof(ui->status_msg), "%s", msg);
     ui->status_until_ms = SDL_GetTicks() + 3000;
 }
 
+/*
+ * Dessine une chaîne UTF-8 à la position `(x, y)` avec la police `font` et la couleur `color`.
+ * Crée une surface texte -> texture temporaire -> copie dans le renderer -> libère.
+ */
 static void draw_text(SDL_Renderer *renderer, TTF_Font *font, const char *text, int x, int y, SDL_Color color) {
     if (!font || !text || text[0] == '\0') {
         return;
@@ -48,6 +70,10 @@ static void draw_text(SDL_Renderer *renderer, TTF_Font *font, const char *text, 
     SDL_FreeSurface(surf);
 }
 
+/*
+ * Initialise l'état de l'interface et charge la police en 3 tailles (titre, corps, petit).
+ * Retourne false si la police ne peut pas être ouverte.
+ */
 bool ui_init(UIState *ui, const char *font_path) {
     memset(ui, 0, sizeof(*ui));
 
@@ -62,12 +88,19 @@ bool ui_init(UIState *ui, const char *font_path) {
     return true;
 }
 
+/*
+ * Ferme et libère les 3 polices TrueType chargées à l'initialisation.
+ */
 void ui_destroy(UIState *ui) {
     if (ui->font_title) TTF_CloseFont(ui->font_title);
     if (ui->font_body)  TTF_CloseFont(ui->font_body);
     if (ui->font_small) TTF_CloseFont(ui->font_small);
 }
 
+/*
+ * Modifie la valeur du champ correspondant à `(tab, row)` selon `delta` (-1 ou +1),
+ * applique les bornes min/max autorisées, et marque la sauvegarde comme modifiée (`dirty`).
+ */
 static void adjust_value(SaveData *save, int tab, int row, int delta) {
     if (tab == 0) {
         if (row == 0) save->money = clamp_int(save->money + delta * 1000, 0, 99999999);
@@ -87,6 +120,13 @@ static void adjust_value(SaveData *save, int tab, int row, int delta) {
     save->dirty = true;
 }
 
+/*
+ * Réagit à une action utilisateur (`InputAction`) :
+ * - Haut/Bas      : change la ligne sélectionnée (avec boucle haut <-> bas)
+ * - Gauche/Droite : diminue ou augmente la valeur sélectionnée
+ * - Tab Prev/Next : change d'onglet et remet la sélection à la ligne 0
+ * - Save          : écrit le XML sur disque et affiche un message de confirmation
+ */
 void ui_handle_input(UIState *ui, SaveData *save, InputAction action) {
     int rows = tab_row_count(ui->active_tab);
 
@@ -123,6 +163,10 @@ void ui_handle_input(UIState *ui, SaveData *save, InputAction action) {
     }
 }
 
+/*
+ * Prépare le libellé (`*label`) et le texte formaté de la valeur (`value`)
+ * pour une ligne donnée `(tab, row)` avant son affichage dans `ui_render`.
+ */
 static void get_row_display(const SaveData *save, int tab, int row, const char **label, char *value, size_t value_size) {
     if (tab == 0) {
         if (row == 0) { *label = "Argent (po)";   snprintf(value, value_size, "%d g", save->money); }
@@ -141,16 +185,26 @@ static void get_row_display(const SaveData *save, int tab, int row, const char *
     }
 }
 
+/*
+ * Dessine une frame complète de l'interface en 960x544 :
+ * 1. Fond bois sombre
+ * 2. Bandeau supérieur (titre + nom du joueur/ferme + indicateur `*` si non sauvegardé)
+ * 3. Barre d'onglets
+ * 4. Panneau central avec la liste des champs et la surbrillance de la ligne sélectionnée
+ * 5. Message de statut temporaire (si actif)
+ * 6. Bandeau inférieur d'aide aux contrôles
+ */
 void ui_render(UIState *ui, SDL_Renderer *renderer, const SaveData *save) {
-    /* Fond bois sombre style Stardew */
+    /* 1. Efface l'écran avec le fond bois sombre */
     SDL_SetRenderDrawColor(renderer, 36, 26, 22, 255);
     SDL_RenderClear(renderer);
 
-    /* Bandeau header */
+    /* 2. Bandeau header */
     SDL_Rect header = { 0, 0, SCREEN_WIDTH, 68 };
     SDL_SetRenderDrawColor(renderer, 64, 42, 30, 255);
     SDL_RenderFillRect(renderer, &header);
 
+    /* Palette de couleurs de texte */
     SDL_Color col_gold   = { 248, 206, 102, 255 };
     SDL_Color col_text   = { 245, 236, 220, 255 };
     SDL_Color col_muted  = { 185, 165, 145, 255 };
@@ -163,7 +217,7 @@ void ui_render(UIState *ui, SDL_Renderer *renderer, const SaveData *save) {
              save->farmer_name, save->farm_name, save->dirty ? " *" : "");
     draw_text(renderer, ui->font_small, subtitle, 560, 26, col_text);
 
-    /* Onglets */
+    /* 3. Barre d'onglets */
     int tab_w = 220;
     int tab_x = 24;
     for (int i = 0; i < TAB_COUNT; i++) {
@@ -178,7 +232,7 @@ void ui_render(UIState *ui, SDL_Renderer *renderer, const SaveData *save) {
                   i == ui->active_tab ? col_gold : col_muted);
     }
 
-    /* Panneau principal */
+    /* 4. Panneau principal et liste des champs */
     SDL_Rect panel = { 24, 140, SCREEN_WIDTH - 48, 336 };
     SDL_SetRenderDrawColor(renderer, 50, 36, 28, 255);
     SDL_RenderFillRect(renderer, &panel);
@@ -190,6 +244,7 @@ void ui_render(UIState *ui, SDL_Renderer *renderer, const SaveData *save) {
         SDL_Rect row_rect = { 44, 162 + r * 56, SCREEN_WIDTH - 88, 46 };
         bool selected = (r == ui->selected_row);
 
+        /* Encadre et met en valeur la ligne actuellement sélectionnée */
         if (selected) {
             SDL_SetRenderDrawColor(renderer, 96, 64, 40, 255);
             SDL_RenderFillRect(renderer, &row_rect);
@@ -203,6 +258,7 @@ void ui_render(UIState *ui, SDL_Renderer *renderer, const SaveData *save) {
 
         draw_text(renderer, ui->font_body, label, row_rect.x + 20, row_rect.y + 11, col_text);
 
+        /* Ajoute les chevrons < ... > autour de la valeur si la ligne est sélectionnée */
         char decorated_val[80];
         if (selected) {
             snprintf(decorated_val, sizeof(decorated_val), "<  %s  >", val_buf);
@@ -213,12 +269,12 @@ void ui_render(UIState *ui, SDL_Renderer *renderer, const SaveData *save) {
                   selected ? col_gold : col_muted);
     }
 
-    /* Message de statut */
+    /* 5. Message de statut temporaire (ex: confirmation de sauvegarde) */
     if (ui->status_msg[0] != '\0' && SDL_GetTicks() < ui->status_until_ms) {
         draw_text(renderer, ui->font_small, ui->status_msg, 24, 484, col_accent);
     }
 
-    /* Bandeau footer */
+    /* 6. Bandeau footer avec rappel des contrôles */
     SDL_Rect footer = { 0, SCREEN_HEIGHT - 38, SCREEN_WIDTH, 38 };
     SDL_SetRenderDrawColor(renderer, 26, 18, 15, 255);
     SDL_RenderFillRect(renderer, &footer);
@@ -227,5 +283,6 @@ void ui_render(UIState *ui, SDL_Renderer *renderer, const SaveData *save) {
               "Haut/Bas: Naviguer  |  Gauche/Droite: Modifier  |  Q/E (L/R): Onglets  |  F5 (Start): Sauvegarder  |  Esc: Quitter",
               24, SCREEN_HEIGHT - 28, col_muted);
 
+    /* Affiche la frame dessinée à l'écran */
     SDL_RenderPresent(renderer);
 }
