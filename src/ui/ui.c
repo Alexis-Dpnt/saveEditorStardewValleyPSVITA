@@ -9,13 +9,14 @@
 #include <string.h>
 
 /* Nombre total d'onglets affichés en haut de l'interface */
-#define TAB_COUNT 3
+#define TAB_COUNT 4
 
 /* Libellés des onglets dans l'ordre d'affichage */
 static const char *TAB_NAMES[TAB_COUNT] = {
     "Joueur",
     "Competences",
-    "Ferme & Temps"
+    "Ferme & Temps",
+    "Objets"
 };
 
 /*
@@ -27,6 +28,7 @@ static int tab_row_count(int tab) {
         case 0: return 3; /* Argent, Énergie max, Santé max */
         case 1: return 5; /* Agriculture, Minage, Cueillette, Pêche, Combat */
         case 2: return 3; /* Jour, Saison, Année */
+        case 3: return 1; /* Poissons */
         default: return 0;
     }
 }
@@ -182,6 +184,8 @@ static void get_row_display(const SaveData *save, int tab, int row, const char *
         if (row == 0) { *label = "Jour";          snprintf(value, value_size, "%d / 28", save->day_of_month); }
         if (row == 1) { *label = "Saison";        snprintf(value, value_size, "%s", save_data_season_name(save->season_index)); }
         if (row == 2) { *label = "Annee";         snprintf(value, value_size, "An %d", save->year); }
+    } else if (tab == 3) {
+        if (row == 0) { *label = "Poissons";      snprintf(value, value_size, "c'est un test") ;}
     }
 }
 

@@ -32,6 +32,8 @@ typedef struct {
 
     bool loaded_from_file; /* true si les données proviennent d'un vrai fichier XML */
     bool dirty;            /* true si des modifications non enregistrées existent */
+
+    
 } SaveData;
 
 /* Initialise la structure avec des valeurs de démonstration (si aucun fichier chargé). */
