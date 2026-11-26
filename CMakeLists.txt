@@ -27,17 +27,27 @@ if(VITA)
 
     target_compile_definitions(${PROJECT_NAME} PRIVATE PLATFORM_VITA=1)
 
+    target_include_directories(${PROJECT_NAME} PRIVATE
+        "$ENV{VITASDK}/arm-vita-eabi/include/SDL2"
+        "$ENV{VITASDK}/arm-vita-eabi/include/libxml2"
+    )
+
     target_link_libraries(${PROJECT_NAME} PRIVATE
         SDL2_ttf
         SDL2
         xml2
         freetype
+        harfbuzz
+        freetype
+        bz2
         png
         z
         m
+        stdc++
         SceDisplay_stub
         SceCtrl_stub
         SceAudio_stub
+        SceAudioIn_stub
         SceSysmodule_stub
         SceGxm_stub
         SceCommonDialog_stub
@@ -45,12 +55,19 @@ if(VITA)
         SceTouch_stub
         SceHid_stub
         SceMotion_stub
+        ScePower_stub
+        SceIme_stub
     )
 
     vita_create_self(${PROJECT_NAME}.self ${PROJECT_NAME})
     vita_create_vpk(${PROJECT_NAME}.vpk ${VITA_TITLEID} ${PROJECT_NAME}.self
         VERSION ${VITA_VERSION}
         NAME ${VITA_APP_NAME}
+        FILE assets/font.ttf assets/font.ttf
+        FILE sce_sys/icon0.png sce_sys/icon0.png
+        FILE sce_sys/livearea/contents/bg.png sce_sys/livearea/contents/bg.png
+        FILE sce_sys/livearea/contents/startup.png sce_sys/livearea/contents/startup.png
+        FILE sce_sys/livearea/contents/template.xml sce_sys/livearea/contents/template.xml
     )
 else()
     find_package(PkgConfig REQUIRED)

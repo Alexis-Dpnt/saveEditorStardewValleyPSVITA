@@ -1,3 +1,7 @@
+/*
+ * ui.h — État et fonctions de l'interface graphique maison (SDL2 + SDL2_ttf).
+ */
+
 #ifndef UI_H
 #define UI_H
 
@@ -8,21 +12,65 @@
 #include <SDL_ttf.h>
 #include <stdbool.h>
 
+/* Sous-mode actif dans l'onglet Bâtiments */
+typedef enum {
+    BLD_MODE_ADD_SELECT  = 0, /* Choisir un nouveau bâtiment dans le catalogue */
+    BLD_MODE_ADD_PLACE   = 1, /* Placer le nouveau bâtiment sur la mini-carte */
+    BLD_MODE_MANAGE_LIST = 2, /* Parcourir les bâtiments existants (déplacer / supprimer) */
+    BLD_MODE_MANAGE_MOVE = 3  /* Déplacer le bâtiment existant sélectionné sur la carte */
+} BuildingMode;
+
+/* Zone de focus dans l'onglet Objets (Inventaire / Coffres / Catalogue) */
+typedef enum {
+    ITEMS_FOCUS_STORAGE = 0, /* Focus sur la zone de stockage (Inventaire Joueur ou Coffre) */
+    ITEMS_FOCUS_CATALOG = 1, /* Focus sur le catalogue d'objets à ajouter (catégories + liste) */
+    ITEMS_FOCUS_QTY     = 2  /* Choix de la quantité avant ajout dans le stockage sélectionné */
+} ItemsFocus;
+
+/*
+ * Contient tout l'état interne de l'interface.
+ */
 typedef struct {
-    TTF_Font *font_title;
-    TTF_Font *font_body;
-    TTF_Font *font_small;
+    TTF_Font *font_title;   /* Police titre (24 px) */
+    TTF_Font *font_body;    /* Police standard (16 px) */
+    TTF_Font *font_small;   /* Police petite (14 px) */
 
-    int active_tab;
-    int selected_row;
+    int active_tab;         /* 0: Sauvegardes, 1: Joueur, 2: Compétences, 3: Ferme, 4: Bâtiments, 5: Objets */
+    int selected_row;       /* Ligne sélectionnée dans l'onglet actif */
 
-    char status_msg[128];
-    Uint32 status_until_ms;
+    /* Sélecteur de sauvegardes (tab == 0) */
+    SaveFileEntry save_files[MAX_SAVE_FILES];
+    int save_file_count;
+
+    /* Constructeur / gestionnaire de bâtiments (tab == 4) */
+    BuildingMode bld_mode;
+    int bld_catalog_idx;    /* Index dans BUILDING_CATALOG (0..15) */
+    int bld_existing_idx;   /* Index dans save->buildings[] pour déplacer/supprimer */
+    int cursor_x;           /* Curseur X sur la ferme (0..79) */
+    int cursor_y;           /* Curseur Y sur la ferme (0..64) */
+
+    /* Gestionnaire d'objets : Inventaire Joueur & Coffres (tab == 5) */
+    ItemsFocus items_focus;       /* Panneau actif : Stockage, Catalogue ou Quantité */
+    int items_storage_idx;        /* 0 = Inventaire Joueur, 1..N = Coffres */
+    int items_slot_idx;           /* Slot sélectionné dans la zone de stockage */
+    int items_category_idx;       /* Catégorie filtrée (0: Tous, 1: Poissons, 2: Minéraux...) */
+    int items_catalog_cursor;     /* Index sélectionné dans la liste filtrée du catalogue */
+    int items_add_qty;            /* Quantité choisie pour l'ajout (1..999) */
+
+    char status_msg[128];   /* Message temporaire en bas de l'écran */
+    Uint32 status_until_ms; /* Fin d'affichage de status_msg */
 } UIState;
 
+/* Charge les polices, scanne les sauvegardes et initialise `ui`. */
 bool ui_init(UIState *ui, const char *font_path);
+
+/* Libère les polices chargées par `ui_init`. */
 void ui_destroy(UIState *ui);
+
+/* Traite une action utilisateur pour tous les onglets. */
 void ui_handle_input(UIState *ui, SaveData *save, InputAction action);
+
+/* Dessine l'ensemble de l'interface en 960x544. */
 void ui_render(UIState *ui, SDL_Renderer *renderer, const SaveData *save);
 
 #endif

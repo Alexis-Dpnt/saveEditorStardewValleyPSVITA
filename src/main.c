@@ -1,3 +1,9 @@
+/*
+ * main.c — Point d'entrée de l'application Stardew Valley Save Editor.
+ * Initialise libxml2, SDL2, SDL2_ttf, charge la première sauvegarde détectée
+ * (ou celle passée en argument), exécute la boucle ~60 FPS et libère tout proprement.
+ */
+
 #include "core/save_data.h"
 #include "platform/platform.h"
 #include "ui/ui.h"
@@ -9,9 +15,6 @@
 #include <stdio.h>
 
 int main(int argc, char *argv[]) {
-    (void)argc;
-    (void)argv;
-
     xmlInitParser();
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
@@ -66,24 +69,23 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    /*
+     * Chargement initial :
+     * 1. Fichier passé en argument (argv[1])
+     * 2. Première sauvegarde trouvée par le scanner automatique (ui.save_files[0])
+     * 3. Sinon mode démo en mémoire
+     */
     SaveData save;
     bool loaded = false;
     if (argc > 1) {
         loaded = save_data_load_xml(&save, argv[1]);
     }
-    if (!loaded) {
-        char vita_sample[512];
-        snprintf(vita_sample, sizeof(vita_sample), "%s/vita_pcse01235/EDWN_117938427/EDWN_117938427",
-                 platform_get_saves_dir());
-        loaded = save_data_load_xml(&save, vita_sample);
-    }
-    if (!loaded) {
-        char sample_path[512];
-        snprintf(sample_path, sizeof(sample_path), "%s/sample_save.xml", platform_get_saves_dir());
-        loaded = save_data_load_xml(&save, sample_path);
+    if (!loaded && ui.save_file_count > 0) {
+        loaded = save_data_load_xml(&save, ui.save_files[0].path);
     }
     if (!loaded) {
         save_data_init_demo(&save);
+        ui.active_tab = 0; /* Ouvre directement l'onglet Sauvegardes s'il n'y a rien de chargé */
     }
 
     bool running = true;
