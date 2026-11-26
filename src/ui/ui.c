@@ -5,7 +5,7 @@
  * - Onglet 2 : Compétences (5 niveaux)
  * - Onglet 3 : Ferme & Temps (jour, saison, année)
  * - Onglet 4 : Bâtiments + mini-carte enrichie (ajout, déplacement, suppression)
- * - Onglet 5 : Objets (Inventaire joueur par défaut, sélecteur de coffres, catalogue filtré)
+ * - Onglet 5 : Objets (Inventaire joueur par défaut, coffres réels, catalogue PS Vita 1.2)
  */
 
 #include "ui/ui.h"
@@ -23,78 +23,6 @@ static const char *TAB_NAMES[TAB_COUNT] = {
     "Batiments",
     "Objets"
 };
-
-/* Catégories affichées dans le filtre du catalogue d'objets */
-#define ITEM_CAT_COUNT 7
-static const char *ITEM_CAT_NAMES[ITEM_CAT_COUNT] = {
-    "Tous",
-    "Poissons",
-    "Mineraux",
-    "Cultures",
-    "Ressources",
-    "Artisanat",
-    "Autres"
-};
-
-/*
- * Données d'aperçu statiques pour la maquette d'interface de l'onglet Objets
- * (la logique réelle de lecture/ajout XML sera branchée dans la branche logique).
- */
-typedef struct {
-    const char *name;
-    int category; /* Index dans ITEM_CAT_NAMES (1..6) */
-    int price;
-} UIPreviewItem;
-
-static const UIPreviewItem UI_PREVIEW_CATALOG[] = {
-    { "Saumon",               1, 75   },
-    { "Thon",                 1, 100  },
-    { "Poisson legendaire",   1, 5000 },
-    { "Esturgeon",            1, 200  },
-    { "Diamant",              2, 750  },
-    { "Eclat prismatique",    2, 2000 },
-    { "Amethyste",            2, 100  },
-    { "Rubis",                2, 250  },
-    { "Fruit ancien",         3, 550  },
-    { "Carambole",            3, 750  },
-    { "Fraise",               3, 120  },
-    { "Citrouille",           3, 320  },
-    { "Bois",                 4, 2    },
-    { "Pierre",               4, 2    },
-    { "Lingot d'iridium",     4, 1000 },
-    { "Batterie",             4, 500  },
-    { "Vin",                  5, 400  },
-    { "Fromage",              5, 230  },
-    { "Miel",                 5, 100  },
-    { "Cafe",                 6, 150  }
-};
-#define UI_PREVIEW_CATALOG_COUNT ((int)(sizeof(UI_PREVIEW_CATALOG) / sizeof(UI_PREVIEW_CATALOG[0])))
-
-typedef struct {
-    const char *label;
-    int slot_count;
-    const char *slots[6];
-    int stacks[6];
-} UIPreviewStorage;
-
-static const UIPreviewStorage UI_PREVIEW_STORAGES[] = {
-    {
-        "Inventaire Joueur", 36,
-        { "Pioche", "Epee", "Houe", "Hache", "Bois", "Pierre" },
-        { 1, 1, 1, 1, 249, 75 }
-    },
-    {
-        "Coffre #1 - Farm (55, 10)", 36,
-        { "Pissenlit", "Diamant", "Graines de panais", "(Vide)", "(Vide)", "(Vide)" },
-        { 9, 4, 25, 0, 0, 0 }
-    },
-    {
-        "Coffre #2 - Farm (57, 12)", 36,
-        { "Saumon", "Thon", "Esturgeon", "(Vide)", "(Vide)", "(Vide)" },
-        { 3, 2, 1, 0, 0, 0 }
-    }
-};
-#define UI_PREVIEW_STORAGE_COUNT ((int)(sizeof(UI_PREVIEW_STORAGES) / sizeof(UI_PREVIEW_STORAGES[0])))
 
 /* Nombre de lignes dans les onglets liste (1, 2, 3) */
 static int tab_row_count(int tab) {
@@ -151,25 +79,25 @@ static int nth_active_building(const SaveData *save, int nth) {
     return -1;
 }
 
-/* Compte le nombre d'objets du catalogue d'aperçu correspondant à la catégorie `cat` (0 = Tous) */
-static int preview_catalog_filtered_count(int cat) {
+/* Compte le nombre d'objets dans ITEMS_DB correspondant à la catégorie `cat` (0 = Tous) */
+static int items_db_filtered_count(int cat) {
     if (cat == 0) {
-        return UI_PREVIEW_CATALOG_COUNT;
+        return ITEMS_DB_COUNT;
     }
     int count = 0;
-    for (int i = 0; i < UI_PREVIEW_CATALOG_COUNT; i++) {
-        if (UI_PREVIEW_CATALOG[i].category == cat) {
+    for (int i = 0; i < ITEMS_DB_COUNT; i++) {
+        if (ITEMS_DB[i].ui_category == cat) {
             count++;
         }
     }
     return count;
 }
 
-/* Retourne l'index réel dans UI_PREVIEW_CATALOG du N-ième élément filtré */
-static int preview_catalog_nth(int cat, int nth) {
+/* Retourne l'index réel dans ITEMS_DB du N-ième élément filtré */
+static int items_db_nth(int cat, int nth) {
     int seen = 0;
-    for (int i = 0; i < UI_PREVIEW_CATALOG_COUNT; i++) {
-        if (cat == 0 || UI_PREVIEW_CATALOG[i].category == cat) {
+    for (int i = 0; i < ITEMS_DB_COUNT; i++) {
+        if (cat == 0 || ITEMS_DB[i].ui_category == cat) {
             if (seen == nth) {
                 return i;
             }
@@ -193,16 +121,15 @@ bool ui_init(UIState *ui, const char *font_path) {
     }
 
     ui->save_file_count = platform_scan_saves(ui->save_files, MAX_SAVE_FILES);
-    ui->active_tab = 1;
+    ui->active_tab = 5; /* Ouvre directement sur l'onglet Objets pour tester immédiatement */
     ui->bld_mode = BLD_MODE_ADD_SELECT;
     ui->bld_catalog_idx = 0;
     ui->bld_existing_idx = 0;
     ui->cursor_x = 35;
     ui->cursor_y = 25;
 
-    /* Onglet Objets : par défaut sur l'inventaire du joueur (index 0) */
     ui->items_focus = ITEMS_FOCUS_STORAGE;
-    ui->items_storage_idx = 0;
+    ui->items_storage_idx = 0; /* Par défaut : Inventaire Joueur */
     ui->items_slot_idx = 0;
     ui->items_category_idx = 0;
     ui->items_catalog_cursor = 0;
@@ -249,17 +176,20 @@ static void handle_saves_input(UIState *ui, SaveData *save, InputAction action) 
         const SaveFileEntry *entry = &ui->save_files[ui->selected_row];
         if (save_data_load_xml(save, entry->path)) {
             char msg[128];
-            snprintf(msg, sizeof(msg), "Sauvegarde chargee : %s (%d batiments)",
-                     entry->label, save_data_active_building_count(save));
+            snprintf(msg, sizeof(msg), "Chargee : %s (%d bat., %d coffres)",
+                     entry->label, save_data_active_building_count(save),
+                     save->storage_count > 0 ? save->storage_count - 1 : 0);
             set_status(ui, msg);
             ui->bld_existing_idx = 0;
+            ui->items_storage_idx = 0;
+            ui->items_slot_idx = 0;
         } else {
             set_status(ui, "Erreur lors du chargement du fichier XML.");
         }
     }
 }
 
-/* Gère les entrées dans l'onglet 4 : Bâtiments (Ajouter, Déplacer, Supprimer) */
+/* Gère les entrées dans l'onglet 4 : Bâtiments */
 static void handle_buildings_input(UIState *ui, SaveData *save, InputAction action) {
     int active_count = save_data_active_building_count(save);
 
@@ -368,13 +298,17 @@ static void handle_buildings_input(UIState *ui, SaveData *save, InputAction acti
 }
 
 /*
- * Gère la navigation purement UI de l'onglet 5 : Objets & Stockages.
- * - Tab / Carré : bascule le focus entre la zone de stockage (gauche) et le catalogue (droite)
- * - Dans Stockage : ←/→ change entre Inventaire Joueur et Coffres, ↑/↓ parcourt les slots
- * - Dans Catalogue : ←/→ filtre par catégorie, ↑/↓ choisit un objet, Entrée choisit la quantité
- * - Dans Quantité : ←/→ ajuste la quantité (↑/↓ par pas de 10), Entrée valide, Backspace annule
+ * Gère les entrées de l'onglet 5 : Objets & Stockages branché sur SaveData + ITEMS_DB.
  */
-static void handle_items_input(UIState *ui, InputAction action) {
+static void handle_items_input(UIState *ui, SaveData *save, InputAction action) {
+    if (save->storage_count <= 0) {
+        return;
+    }
+    if (ui->items_storage_idx >= save->storage_count) {
+        ui->items_storage_idx = 0;
+        ui->items_slot_idx = 0;
+    }
+
     if (action == INPUT_MODE_SWITCH) {
         if (ui->items_focus == ITEMS_FOCUS_STORAGE) {
             ui->items_focus = ITEMS_FOCUS_CATALOG;
@@ -384,26 +318,35 @@ static void handle_items_input(UIState *ui, InputAction action) {
         return;
     }
 
+    StorageContainer *st = &save->storages[ui->items_storage_idx];
+
     if (ui->items_focus == ITEMS_FOCUS_STORAGE) {
-        int slot_count = UI_PREVIEW_STORAGES[ui->items_storage_idx].slot_count;
         if (action == INPUT_LEFT) {
-            ui->items_storage_idx = (ui->items_storage_idx - 1 + UI_PREVIEW_STORAGE_COUNT) % UI_PREVIEW_STORAGE_COUNT;
+            ui->items_storage_idx = (ui->items_storage_idx - 1 + save->storage_count) % save->storage_count;
             ui->items_slot_idx = 0;
         } else if (action == INPUT_RIGHT) {
-            ui->items_storage_idx = (ui->items_storage_idx + 1) % UI_PREVIEW_STORAGE_COUNT;
+            ui->items_storage_idx = (ui->items_storage_idx + 1) % save->storage_count;
             ui->items_slot_idx = 0;
         } else if (action == INPUT_UP) {
-            ui->items_slot_idx = (ui->items_slot_idx - 1 + slot_count) % slot_count;
+            ui->items_slot_idx = (ui->items_slot_idx - 1 + st->max_slots) % st->max_slots;
         } else if (action == INPUT_DOWN) {
-            ui->items_slot_idx = (ui->items_slot_idx + 1) % slot_count;
+            ui->items_slot_idx = (ui->items_slot_idx + 1) % st->max_slots;
         } else if (action == INPUT_CONFIRM) {
-            /* Raccourci pratique : passer au catalogue pour ajouter dans ce stockage */
             ui->items_focus = ITEMS_FOCUS_CATALOG;
         } else if (action == INPUT_DELETE) {
-            set_status(ui, "[UI] Suppression d'objet a brancher dans la logique.");
+            char removed_name[64];
+            snprintf(removed_name, sizeof(removed_name), "%s", st->slots[ui->items_slot_idx].name);
+            if (save_data_remove_item(save, ui->items_storage_idx, ui->items_slot_idx)) {
+                char msg[128];
+                snprintf(msg, sizeof(msg), "%s retire de %s ! F5/Start pour sauver.",
+                         removed_name, st->label);
+                set_status(ui, msg);
+            } else {
+                set_status(ui, "Ce slot est deja vide.");
+            }
         }
     } else if (ui->items_focus == ITEMS_FOCUS_CATALOG) {
-        int filtered = preview_catalog_filtered_count(ui->items_category_idx);
+        int filtered = items_db_filtered_count(ui->items_category_idx);
         if (action == INPUT_LEFT) {
             ui->items_category_idx = (ui->items_category_idx - 1 + ITEM_CAT_COUNT) % ITEM_CAT_COUNT;
             ui->items_catalog_cursor = 0;
@@ -429,13 +372,16 @@ static void handle_items_input(UIState *ui, InputAction action) {
         } else if (action == INPUT_UP) {
             ui->items_add_qty = clamp_int(ui->items_add_qty + 10, 1, 999);
         } else if (action == INPUT_CONFIRM) {
-            int real_idx = preview_catalog_nth(ui->items_category_idx, ui->items_catalog_cursor);
-            if (real_idx >= 0) {
-                char msg[128];
-                snprintf(msg, sizeof(msg), "[UI] Pret a ajouter %s x%d dans %s.",
-                         UI_PREVIEW_CATALOG[real_idx].name, ui->items_add_qty,
-                         UI_PREVIEW_STORAGES[ui->items_storage_idx].label);
-                set_status(ui, msg);
+            int db_idx = items_db_nth(ui->items_category_idx, ui->items_catalog_cursor);
+            if (db_idx >= 0) {
+                if (save_data_add_item(save, ui->items_storage_idx, db_idx, ui->items_add_qty)) {
+                    char msg[128];
+                    snprintf(msg, sizeof(msg), "%s x%d ajoute dans %s ! F5/Start pour sauver.",
+                             ITEMS_DB[db_idx].name, ui->items_add_qty, st->label);
+                    set_status(ui, msg);
+                } else {
+                    set_status(ui, "Stockage plein ! Libere un slot ou change de coffre.");
+                }
             }
             ui->items_focus = ITEMS_FOCUS_CATALOG;
         } else if (action == INPUT_CANCEL) {
@@ -479,7 +425,7 @@ void ui_handle_input(UIState *ui, SaveData *save, InputAction action) {
         return;
     }
     if (ui->active_tab == 5) {
-        handle_items_input(ui, action);
+        handle_items_input(ui, save, action);
         return;
     }
 
@@ -786,23 +732,31 @@ static void render_buildings_tab(UIState *ui, SDL_Renderer *renderer, const Save
 }
 
 /*
- * Rendu de l'onglet 5 : Interface Objets & Stockages
- * - Bandeau supérieur : sélecteur de zone de stockage (Inventaire Joueur par défaut ou Coffre)
- * - Panneau gauche : contenu (slots) de la zone sélectionnée
- * - Panneau droit : catalogue filtrable par catégorie (Poissons, Minéraux, Cultures...) + quantité
+ * Rendu de l'onglet 5 : Inventaire Joueur / Coffres réels + Catalogue complet PS Vita 1.2
  */
-static void render_items_tab(UIState *ui, SDL_Renderer *renderer) {
+static void render_items_tab(UIState *ui, SDL_Renderer *renderer, const SaveData *save) {
     SDL_Color col_gold  = { 248, 206, 102, 255 };
     SDL_Color col_text  = { 245, 236, 220, 255 };
     SDL_Color col_muted = { 185, 165, 145, 255 };
     SDL_Color col_green = { 120, 225, 120, 255 };
     SDL_Color col_cyan  = { 115, 215, 235, 255 };
 
+    if (save->storage_count <= 0) {
+        draw_text(renderer, ui->font_body, "Aucun stockage disponible.", 44, 180, col_muted);
+        return;
+    }
+
+    int st_idx = ui->items_storage_idx;
+    if (st_idx >= save->storage_count) {
+        st_idx = 0;
+    }
+    const StorageContainer *st = &save->storages[st_idx];
+    int used = save_data_storage_used_count(st);
+
     bool focus_left  = (ui->items_focus == ITEMS_FOCUS_STORAGE);
     bool focus_right = (ui->items_focus == ITEMS_FOCUS_CATALOG || ui->items_focus == ITEMS_FOCUS_QTY);
 
-    /* 1. Barre sélecteur de zone de stockage (haut du panneau) */
-    const UIPreviewStorage *st = &UI_PREVIEW_STORAGES[ui->items_storage_idx];
+    /* 1. Barre sélecteur de zone de stockage (Inventaire Joueur ou Coffres) */
     SDL_Rect storage_bar = { 34, 148, 892, 32 };
     SDL_SetRenderDrawColor(renderer, focus_left ? 86 : 58, focus_left ? 58 : 42, focus_left ? 38 : 34, 255);
     SDL_RenderFillRect(renderer, &storage_bar);
@@ -810,14 +764,14 @@ static void render_items_tab(UIState *ui, SDL_Renderer *renderer) {
     SDL_RenderDrawRect(renderer, &storage_bar);
 
     char bar_txt[160];
-    snprintf(bar_txt, sizeof(bar_txt), "Zone de stockage (%d/%d) :   <  %s  >",
-             ui->items_storage_idx + 1, UI_PREVIEW_STORAGE_COUNT, st->label);
+    snprintf(bar_txt, sizeof(bar_txt), "Stockage (%d/%d) :   <  %s (%d/%d)  >",
+             st_idx + 1, save->storage_count, st->label, used, st->max_slots);
     draw_text(renderer, ui->font_body, bar_txt, storage_bar.x + 14, storage_bar.y + 6,
               focus_left ? col_gold : col_text);
     draw_text(renderer, ui->font_small, "[Tab / Carre : changer panneau]",
               storage_bar.x + 650, storage_bar.y + 8, col_muted);
 
-    /* 2. Panneau gauche : Contenu du stockage sélectionné */
+    /* 2. Panneau gauche : Contenu réel de la zone sélectionnée */
     SDL_Rect left_box = { 34, 188, 434, 282 };
     SDL_SetRenderDrawColor(renderer, 42, 30, 24, 255);
     SDL_RenderFillRect(renderer, &left_box);
@@ -825,15 +779,20 @@ static void render_items_tab(UIState *ui, SDL_Renderer *renderer) {
     SDL_RenderDrawRect(renderer, &left_box);
 
     char left_hdr[96];
-    snprintf(left_hdr, sizeof(left_hdr), "Contenu (%d slots) - Slot #%02d",
-             st->slot_count, ui->items_slot_idx + 1);
+    snprintf(left_hdr, sizeof(left_hdr), "Contenu (%d/%d) - Slot #%02d",
+             used, st->max_slots, ui->items_slot_idx + 1);
     draw_text(renderer, ui->font_small, left_hdr, left_box.x + 12, left_box.y + 8,
               focus_left ? col_gold : col_muted);
 
     const int visible_slots = 7;
-    int slot_start = clamp_int(ui->items_slot_idx - visible_slots / 2, 0, st->slot_count - visible_slots);
-    for (int i = 0; i < visible_slots; i++) {
+    int slot_start = 0;
+    if (st->max_slots > visible_slots) {
+        slot_start = clamp_int(ui->items_slot_idx - visible_slots / 2, 0, st->max_slots - visible_slots);
+    }
+    int show_slots = st->max_slots < visible_slots ? st->max_slots : visible_slots;
+    for (int i = 0; i < show_slots; i++) {
         int sidx = slot_start + i;
+        const StorageSlot *slot = &st->slots[sidx];
         SDL_Rect srow = { left_box.x + 10, left_box.y + 32 + i * 31, left_box.w - 20, 27 };
         bool sel = (focus_left && sidx == ui->items_slot_idx);
 
@@ -847,21 +806,19 @@ static void render_items_tab(UIState *ui, SDL_Renderer *renderer) {
             SDL_RenderFillRect(renderer, &srow);
         }
 
-        const char *iname = (sidx < 6) ? st->slots[sidx] : "(Vide)";
-        int qty = (sidx < 6) ? st->stacks[sidx] : 0;
-
         char slot_line[96];
-        if (qty > 0) {
-            snprintf(slot_line, sizeof(slot_line), "%02d. %s", sidx + 1, iname);
+        if (slot->occupied) {
+            snprintf(slot_line, sizeof(slot_line), "%02d. %s%s",
+                     sidx + 1, slot->name, slot->is_modified ? " *" : "");
         } else {
             snprintf(slot_line, sizeof(slot_line), "%02d. (Vide)", sidx + 1);
         }
         draw_text(renderer, ui->font_small, slot_line, srow.x + 10, srow.y + 5,
-                  qty > 0 ? (sel ? col_gold : col_text) : col_muted);
+                  slot->occupied ? (sel ? col_gold : (slot->is_modified ? col_green : col_text)) : col_muted);
 
-        if (qty > 0) {
+        if (slot->occupied) {
             char qbuf[24];
-            snprintf(qbuf, sizeof(qbuf), "x%d", qty);
+            snprintf(qbuf, sizeof(qbuf), "x%d", slot->stack);
             draw_text(renderer, ui->font_small, qbuf, srow.x + 340, srow.y + 5, col_cyan);
         }
     }
@@ -869,26 +826,24 @@ static void render_items_tab(UIState *ui, SDL_Renderer *renderer) {
     draw_text(renderer, ui->font_small, "Gauche/Droite: Changer coffre  |  X: Retirer",
               left_box.x + 12, left_box.y + 256, col_muted);
 
-    /* 3. Panneau droit : Catalogue d'objets à ajouter */
+    /* 3. Panneau droit : Catalogue officiel PS Vita (492 objets) */
     SDL_Rect right_box = { 480, 188, 446, 282 };
     SDL_SetRenderDrawColor(renderer, 42, 30, 24, 255);
     SDL_RenderFillRect(renderer, &right_box);
     SDL_SetRenderDrawColor(renderer, focus_right ? 248 : 96, focus_right ? 206 : 68, focus_right ? 102 : 48, 255);
     SDL_RenderDrawRect(renderer, &right_box);
 
-    /* Barre de catégorie */
     SDL_Rect cat_bar = { right_box.x + 10, right_box.y + 8, right_box.w - 20, 26 };
     SDL_SetRenderDrawColor(renderer, 66, 46, 34, 255);
     SDL_RenderFillRect(renderer, &cat_bar);
 
-    int filtered = preview_catalog_filtered_count(ui->items_category_idx);
+    int filtered = items_db_filtered_count(ui->items_category_idx);
     char cat_txt[96];
-    snprintf(cat_txt, sizeof(cat_txt), "Categorie : < %s >  (%d)",
+    snprintf(cat_txt, sizeof(cat_txt), "Categorie : < %s >  (%d objets)",
              ITEM_CAT_NAMES[ui->items_category_idx], filtered);
     draw_text(renderer, ui->font_small, cat_txt, cat_bar.x + 10, cat_bar.y + 5,
               focus_right ? col_gold : col_text);
 
-    /* Liste d'objets filtrée */
     const int visible_cat = 6;
     int cat_start = 0;
     if (filtered > visible_cat) {
@@ -897,8 +852,8 @@ static void render_items_tab(UIState *ui, SDL_Renderer *renderer) {
     int show_cat = filtered < visible_cat ? filtered : visible_cat;
     for (int i = 0; i < show_cat; i++) {
         int nth = cat_start + i;
-        int real_idx = preview_catalog_nth(ui->items_category_idx, nth);
-        const UIPreviewItem *it = &UI_PREVIEW_CATALOG[real_idx];
+        int db_idx = items_db_nth(ui->items_category_idx, nth);
+        const ItemDef *it = &ITEMS_DB[db_idx];
         SDL_Rect crow = { right_box.x + 10, right_box.y + 42 + i * 30, right_box.w - 20, 26 };
         bool sel = (focus_right && nth == ui->items_catalog_cursor);
 
@@ -912,7 +867,7 @@ static void render_items_tab(UIState *ui, SDL_Renderer *renderer) {
         draw_text(renderer, ui->font_small, it->name, crow.x + 10, crow.y + 5, sel ? col_gold : col_text);
 
         char meta[48];
-        snprintf(meta, sizeof(meta), "[%s] %dg", ITEM_CAT_NAMES[it->category], it->price);
+        snprintf(meta, sizeof(meta), "[%s] %dg", ITEM_CAT_NAMES[it->ui_category], it->price);
         draw_text(renderer, ui->font_small, meta, crow.x + 255, crow.y + 5, col_muted);
     }
 
@@ -988,7 +943,7 @@ void ui_render(UIState *ui, SDL_Renderer *renderer, const SaveData *save) {
     } else if (ui->active_tab == 4) {
         render_buildings_tab(ui, renderer, save);
     } else if (ui->active_tab == 5) {
-        render_items_tab(ui, renderer);
+        render_items_tab(ui, renderer, save);
     } else {
         int rows = tab_row_count(ui->active_tab);
         for (int r = 0; r < rows; r++) {
@@ -1033,7 +988,7 @@ void ui_render(UIState *ui, SDL_Renderer *renderer, const SaveData *save) {
     if (ui->active_tab == 4) {
         help_text = "Fleches: Deplacer  |  Entree: Valider  |  Tab/Carre: Mode  |  X/Tri: Suppr  |  Q/E: Onglets  |  F5: Sauver";
     } else if (ui->active_tab == 5) {
-        help_text = "Tab/Carre: Stockage/Catalogue  |  Gauche/Droite: Coffre/Cat  |  Entree: Ajouter  |  X: Retirer  |  Q/E: Onglets";
+        help_text = "Tab/Carre: Stockage/Catalogue  |  Gauche/Droite: Coffre/Cat  |  Entree: Ajouter  |  X: Retirer  |  F5: Sauver";
     } else {
         help_text = "Haut/Bas: Naviguer  |  Gauche/Droite: Modifier  |  Entree: Charger  |  Q/E (L/R): Onglets  |  F5: Sauver";
     }
