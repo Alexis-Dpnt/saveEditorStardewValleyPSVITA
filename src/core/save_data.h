@@ -1,18 +1,21 @@
 /*
  * save_data.h — Modèle de données et fonctions de lecture/écriture XML
  * pour les fichiers de sauvegarde Stardew Valley (joueur, temps, bâtiments,
- * éléments de la ferme et synchronisation SaveGameInfo).
+ * inventaire joueur, coffres, éléments de la ferme et synchronisation SaveGameInfo).
  */
 
 #ifndef SAVE_DATA_H
 #define SAVE_DATA_H
 
 #include "core/farm_map.h"
+#include "core/items_db.h"
 
 #include <stdbool.h>
 #include <stdint.h>
 
-#define MAX_BUILDINGS 64
+#define MAX_BUILDINGS     64
+#define MAX_STORAGES      32 /* 0 = Inventaire Joueur, 1..31 = Coffres trouvés */
+#define MAX_STORAGE_SLOTS 36 /* Jusqu'à 36 slots par inventaire ou coffre */
 
 /* Type d'élément dynamique posé sur la ferme (affiché sur la mini-carte) */
 typedef enum {
@@ -40,6 +43,29 @@ typedef struct {
     bool is_deleted;        /* true si marqué pour suppression lors de la sauvegarde */
 } BuildingEntry;
 
+/* Représente un emplacement (slot) dans l'inventaire du joueur ou dans un coffre */
+typedef struct {
+    bool occupied;          /* true si un objet est présent dans ce slot */
+    bool existed_in_xml;    /* true si ce slot correspondait à un nœud déjà présent dans le XML */
+    char name[64];          /* Nom de l'objet affiché */
+    int parent_sheet_idx;   /* ID de l'objet (<parentSheetIndex>, -1 pour outils/armes) */
+    int stack;              /* Quantité (1..999) */
+    int db_index;           /* Index dans ITEMS_DB si nouvel objet ajouté (-1 sinon) */
+    bool is_modified;       /* true si ajouté ou quantité modifiée */
+    bool is_cleared;        /* true si vidé/supprimé */
+} StorageSlot;
+
+/* Représente une zone de stockage : Inventaire Joueur (index 0) ou un Coffre */
+typedef struct {
+    bool is_player_inv;     /* true = <player>/<items>, false = <Chest>/<items> */
+    char label[96];         /* Libellé affiché (ex: "Inventaire Joueur", "Coffre #1 - Farm (55,10)") */
+    char location_name[64]; /* Nom du <GameLocation> contenant le coffre */
+    int tile_x;             /* Coordonnée X du coffre dans la carte */
+    int tile_y;             /* Coordonnée Y du coffre dans la carte */
+    int max_slots;          /* Capacité de la zone (12/24/36 pour le joueur, 36 pour un coffre) */
+    StorageSlot slots[MAX_STORAGE_SLOTS];
+} StorageContainer;
+
 /*
  * Représente les champs éditables d'une sauvegarde Stardew Valley en mémoire.
  */
@@ -65,6 +91,9 @@ typedef struct {
     BuildingEntry buildings[MAX_BUILDINGS]; /* Bâtiments construits sur la ferme */
     int building_count;                     /* Nombre d'entrées dans buildings[] */
 
+    StorageContainer storages[MAX_STORAGES]; /* 0 = Inventaire Joueur, 1..N = Coffres */
+    int storage_count;                       /* Nombre total de zones de stockage */
+
     /* Couche visuelle des objets/arbres/cultures de la ferme (FarmOverlayType) */
     uint8_t farm_overlay[FARM_HEIGHT][FARM_WIDTH];
 
@@ -78,26 +107,21 @@ void save_data_init_demo(SaveData *data);
 /* Charge et parse un fichier de sauvegarde XML Stardew Valley dans data. Retourne true si succès. */
 bool save_data_load_xml(SaveData *data, const char *path);
 
-/* Sauvegarde les modifications (joueur, bâtiments, débris) et synchronise SaveGameInfo. */
+/* Sauvegarde toutes les modifications (joueur, bâtiments, objets, coffres) et synchronise SaveGameInfo. */
 bool save_data_save_xml(SaveData *data);
 
-/* Vérifie si (x, y, w, h) est libre sur la carte en ignorant éventuellement `ignore_idx`. */
+/* Bâtiments */
 bool save_data_can_place_building_ignore(const SaveData *data, int x, int y, int w, int h, int ignore_idx);
-
-/* Vérifie si un nouveau bâtiment de taille (w, h) peut être posé en (x, y) sans collision. */
 bool save_data_can_place_building(const SaveData *data, int x, int y, int w, int h);
-
-/* Ajoute un nouveau bâtiment issu de BUILDING_CATALOG[catalog_index] aux coordonnées (x, y). */
 bool save_data_add_building(SaveData *data, int catalog_index, int tile_x, int tile_y);
-
-/* Déplace un bâtiment existant `index` vers `(new_x, new_y)`. Retourne true si valide. */
 bool save_data_move_building(SaveData *data, int index, int new_x, int new_y);
-
-/* Marque un bâtiment `index` pour suppression (ou le retire immédiatement s'il est nouveau). */
 bool save_data_delete_building(SaveData *data, int index);
-
-/* Retourne le nombre de bâtiments actifs (non supprimés) sur la ferme. */
 int save_data_active_building_count(const SaveData *data);
+
+/* Inventaire joueur & Coffres */
+bool save_data_add_item(SaveData *data, int storage_idx, int db_index, int qty);
+bool save_data_remove_item(SaveData *data, int storage_idx, int slot_idx);
+int save_data_storage_used_count(const StorageContainer *storage);
 
 /* Retourne le nom de la saison en français ("Printemps", "Ete", "Automne", "Hiver"). */
 const char *save_data_season_name(int season_index);
