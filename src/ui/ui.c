@@ -4,8 +4,8 @@
  * - Onglet 1 : Joueur (argent, énergie, santé)
  * - Onglet 2 : Compétences (5 niveaux)
  * - Onglet 3 : Ferme & Temps (jour, saison, année)
- * - Onglet 4 : Bâtiments + mini-carte enrichie (coffres, arroseurs, machines,
- *              arbres, cultures) avec ajout, déplacement et suppression.
+ * - Onglet 4 : Bâtiments + mini-carte enrichie (ajout, déplacement, suppression)
+ * - Onglet 5 : Objets (Inventaire joueur par défaut, sélecteur de coffres, catalogue filtré)
  */
 
 #include "ui/ui.h"
@@ -13,15 +13,88 @@
 #include <stdio.h>
 #include <string.h>
 
-#define TAB_COUNT 5
+#define TAB_COUNT 6
 
 static const char *TAB_NAMES[TAB_COUNT] = {
     "Sauvegardes",
     "Joueur",
     "Competences",
     "Ferme & Temps",
-    "Batiments"
+    "Batiments",
+    "Objets"
 };
+
+/* Catégories affichées dans le filtre du catalogue d'objets */
+#define ITEM_CAT_COUNT 7
+static const char *ITEM_CAT_NAMES[ITEM_CAT_COUNT] = {
+    "Tous",
+    "Poissons",
+    "Mineraux",
+    "Cultures",
+    "Ressources",
+    "Artisanat",
+    "Autres"
+};
+
+/*
+ * Données d'aperçu statiques pour la maquette d'interface de l'onglet Objets
+ * (la logique réelle de lecture/ajout XML sera branchée dans la branche logique).
+ */
+typedef struct {
+    const char *name;
+    int category; /* Index dans ITEM_CAT_NAMES (1..6) */
+    int price;
+} UIPreviewItem;
+
+static const UIPreviewItem UI_PREVIEW_CATALOG[] = {
+    { "Saumon",               1, 75   },
+    { "Thon",                 1, 100  },
+    { "Poisson legendaire",   1, 5000 },
+    { "Esturgeon",            1, 200  },
+    { "Diamant",              2, 750  },
+    { "Eclat prismatique",    2, 2000 },
+    { "Amethyste",            2, 100  },
+    { "Rubis",                2, 250  },
+    { "Fruit ancien",         3, 550  },
+    { "Carambole",            3, 750  },
+    { "Fraise",               3, 120  },
+    { "Citrouille",           3, 320  },
+    { "Bois",                 4, 2    },
+    { "Pierre",               4, 2    },
+    { "Lingot d'iridium",     4, 1000 },
+    { "Batterie",             4, 500  },
+    { "Vin",                  5, 400  },
+    { "Fromage",              5, 230  },
+    { "Miel",                 5, 100  },
+    { "Cafe",                 6, 150  }
+};
+#define UI_PREVIEW_CATALOG_COUNT ((int)(sizeof(UI_PREVIEW_CATALOG) / sizeof(UI_PREVIEW_CATALOG[0])))
+
+typedef struct {
+    const char *label;
+    int slot_count;
+    const char *slots[6];
+    int stacks[6];
+} UIPreviewStorage;
+
+static const UIPreviewStorage UI_PREVIEW_STORAGES[] = {
+    {
+        "Inventaire Joueur", 36,
+        { "Pioche", "Epee", "Houe", "Hache", "Bois", "Pierre" },
+        { 1, 1, 1, 1, 249, 75 }
+    },
+    {
+        "Coffre #1 - Farm (55, 10)", 36,
+        { "Pissenlit", "Diamant", "Graines de panais", "(Vide)", "(Vide)", "(Vide)" },
+        { 9, 4, 25, 0, 0, 0 }
+    },
+    {
+        "Coffre #2 - Farm (57, 12)", 36,
+        { "Saumon", "Thon", "Esturgeon", "(Vide)", "(Vide)", "(Vide)" },
+        { 3, 2, 1, 0, 0, 0 }
+    }
+};
+#define UI_PREVIEW_STORAGE_COUNT ((int)(sizeof(UI_PREVIEW_STORAGES) / sizeof(UI_PREVIEW_STORAGES[0])))
 
 /* Nombre de lignes dans les onglets liste (1, 2, 3) */
 static int tab_row_count(int tab) {
@@ -64,10 +137,7 @@ static void draw_text(SDL_Renderer *renderer, TTF_Font *font, const char *text, 
     SDL_FreeSurface(surf);
 }
 
-/*
- * Retourne l'index dans `save->buildings[]` du N-ième bâtiment actif (non supprimé),
- * ou -1 s'il n'y en a pas.
- */
+/* Retourne l'index dans `save->buildings[]` du N-ième bâtiment actif */
 static int nth_active_building(const SaveData *save, int nth) {
     int seen = 0;
     for (int i = 0; i < save->building_count; i++) {
@@ -81,12 +151,40 @@ static int nth_active_building(const SaveData *save, int nth) {
     return -1;
 }
 
-/* Initialise les polices, scanne les sauvegardes disponibles et place le curseur par défaut */
+/* Compte le nombre d'objets du catalogue d'aperçu correspondant à la catégorie `cat` (0 = Tous) */
+static int preview_catalog_filtered_count(int cat) {
+    if (cat == 0) {
+        return UI_PREVIEW_CATALOG_COUNT;
+    }
+    int count = 0;
+    for (int i = 0; i < UI_PREVIEW_CATALOG_COUNT; i++) {
+        if (UI_PREVIEW_CATALOG[i].category == cat) {
+            count++;
+        }
+    }
+    return count;
+}
+
+/* Retourne l'index réel dans UI_PREVIEW_CATALOG du N-ième élément filtré */
+static int preview_catalog_nth(int cat, int nth) {
+    int seen = 0;
+    for (int i = 0; i < UI_PREVIEW_CATALOG_COUNT; i++) {
+        if (cat == 0 || UI_PREVIEW_CATALOG[i].category == cat) {
+            if (seen == nth) {
+                return i;
+            }
+            seen++;
+        }
+    }
+    return -1;
+}
+
+/* Initialise les polices, scanne les sauvegardes disponibles et initialise l'état UI */
 bool ui_init(UIState *ui, const char *font_path) {
     memset(ui, 0, sizeof(*ui));
 
     ui->font_title = TTF_OpenFont(font_path, 24);
-    ui->font_body  = TTF_OpenFont(font_path, 18);
+    ui->font_body  = TTF_OpenFont(font_path, 16);
     ui->font_small = TTF_OpenFont(font_path, 14);
 
     if (!ui->font_title || !ui->font_body || !ui->font_small) {
@@ -95,12 +193,20 @@ bool ui_init(UIState *ui, const char *font_path) {
     }
 
     ui->save_file_count = platform_scan_saves(ui->save_files, MAX_SAVE_FILES);
-    ui->active_tab = 1; /* Démarre sur Joueur (Sauvegardes accessible via Q/L) */
+    ui->active_tab = 1;
     ui->bld_mode = BLD_MODE_ADD_SELECT;
     ui->bld_catalog_idx = 0;
     ui->bld_existing_idx = 0;
     ui->cursor_x = 35;
     ui->cursor_y = 25;
+
+    /* Onglet Objets : par défaut sur l'inventaire du joueur (index 0) */
+    ui->items_focus = ITEMS_FOCUS_STORAGE;
+    ui->items_storage_idx = 0;
+    ui->items_slot_idx = 0;
+    ui->items_category_idx = 0;
+    ui->items_catalog_cursor = 0;
+    ui->items_add_qty = 1;
     return true;
 }
 
@@ -157,7 +263,6 @@ static void handle_saves_input(UIState *ui, SaveData *save, InputAction action) 
 static void handle_buildings_input(UIState *ui, SaveData *save, InputAction action) {
     int active_count = save_data_active_building_count(save);
 
-    /* Bascule rapide Tab / Carré entre "Ajouter" et "Gérer existants" */
     if (action == INPUT_MODE_SWITCH) {
         if (ui->bld_mode == BLD_MODE_ADD_SELECT || ui->bld_mode == BLD_MODE_ADD_PLACE) {
             ui->bld_mode = BLD_MODE_MANAGE_LIST;
@@ -215,7 +320,6 @@ static void handle_buildings_input(UIState *ui, SaveData *save, InputAction acti
         } else if (action == INPUT_DOWN) {
             ui->bld_existing_idx = (ui->bld_existing_idx + 1) % active_count;
         } else if (action == INPUT_CONFIRM && real_idx >= 0) {
-            /* Passe en mode déplacement pour ce bâtiment */
             ui->cursor_x = save->buildings[real_idx].tile_x;
             ui->cursor_y = save->buildings[real_idx].tile_y;
             ui->bld_mode = BLD_MODE_MANAGE_MOVE;
@@ -263,6 +367,83 @@ static void handle_buildings_input(UIState *ui, SaveData *save, InputAction acti
     }
 }
 
+/*
+ * Gère la navigation purement UI de l'onglet 5 : Objets & Stockages.
+ * - Tab / Carré : bascule le focus entre la zone de stockage (gauche) et le catalogue (droite)
+ * - Dans Stockage : ←/→ change entre Inventaire Joueur et Coffres, ↑/↓ parcourt les slots
+ * - Dans Catalogue : ←/→ filtre par catégorie, ↑/↓ choisit un objet, Entrée choisit la quantité
+ * - Dans Quantité : ←/→ ajuste la quantité (↑/↓ par pas de 10), Entrée valide, Backspace annule
+ */
+static void handle_items_input(UIState *ui, InputAction action) {
+    if (action == INPUT_MODE_SWITCH) {
+        if (ui->items_focus == ITEMS_FOCUS_STORAGE) {
+            ui->items_focus = ITEMS_FOCUS_CATALOG;
+        } else {
+            ui->items_focus = ITEMS_FOCUS_STORAGE;
+        }
+        return;
+    }
+
+    if (ui->items_focus == ITEMS_FOCUS_STORAGE) {
+        int slot_count = UI_PREVIEW_STORAGES[ui->items_storage_idx].slot_count;
+        if (action == INPUT_LEFT) {
+            ui->items_storage_idx = (ui->items_storage_idx - 1 + UI_PREVIEW_STORAGE_COUNT) % UI_PREVIEW_STORAGE_COUNT;
+            ui->items_slot_idx = 0;
+        } else if (action == INPUT_RIGHT) {
+            ui->items_storage_idx = (ui->items_storage_idx + 1) % UI_PREVIEW_STORAGE_COUNT;
+            ui->items_slot_idx = 0;
+        } else if (action == INPUT_UP) {
+            ui->items_slot_idx = (ui->items_slot_idx - 1 + slot_count) % slot_count;
+        } else if (action == INPUT_DOWN) {
+            ui->items_slot_idx = (ui->items_slot_idx + 1) % slot_count;
+        } else if (action == INPUT_CONFIRM) {
+            /* Raccourci pratique : passer au catalogue pour ajouter dans ce stockage */
+            ui->items_focus = ITEMS_FOCUS_CATALOG;
+        } else if (action == INPUT_DELETE) {
+            set_status(ui, "[UI] Suppression d'objet a brancher dans la logique.");
+        }
+    } else if (ui->items_focus == ITEMS_FOCUS_CATALOG) {
+        int filtered = preview_catalog_filtered_count(ui->items_category_idx);
+        if (action == INPUT_LEFT) {
+            ui->items_category_idx = (ui->items_category_idx - 1 + ITEM_CAT_COUNT) % ITEM_CAT_COUNT;
+            ui->items_catalog_cursor = 0;
+        } else if (action == INPUT_RIGHT) {
+            ui->items_category_idx = (ui->items_category_idx + 1) % ITEM_CAT_COUNT;
+            ui->items_catalog_cursor = 0;
+        } else if (action == INPUT_UP && filtered > 0) {
+            ui->items_catalog_cursor = (ui->items_catalog_cursor - 1 + filtered) % filtered;
+        } else if (action == INPUT_DOWN && filtered > 0) {
+            ui->items_catalog_cursor = (ui->items_catalog_cursor + 1) % filtered;
+        } else if (action == INPUT_CONFIRM && filtered > 0) {
+            ui->items_focus = ITEMS_FOCUS_QTY;
+        } else if (action == INPUT_CANCEL) {
+            ui->items_focus = ITEMS_FOCUS_STORAGE;
+        }
+    } else if (ui->items_focus == ITEMS_FOCUS_QTY) {
+        if (action == INPUT_LEFT) {
+            ui->items_add_qty = clamp_int(ui->items_add_qty - 1, 1, 999);
+        } else if (action == INPUT_RIGHT) {
+            ui->items_add_qty = clamp_int(ui->items_add_qty + 1, 1, 999);
+        } else if (action == INPUT_DOWN) {
+            ui->items_add_qty = clamp_int(ui->items_add_qty - 10, 1, 999);
+        } else if (action == INPUT_UP) {
+            ui->items_add_qty = clamp_int(ui->items_add_qty + 10, 1, 999);
+        } else if (action == INPUT_CONFIRM) {
+            int real_idx = preview_catalog_nth(ui->items_category_idx, ui->items_catalog_cursor);
+            if (real_idx >= 0) {
+                char msg[128];
+                snprintf(msg, sizeof(msg), "[UI] Pret a ajouter %s x%d dans %s.",
+                         UI_PREVIEW_CATALOG[real_idx].name, ui->items_add_qty,
+                         UI_PREVIEW_STORAGES[ui->items_storage_idx].label);
+                set_status(ui, msg);
+            }
+            ui->items_focus = ITEMS_FOCUS_CATALOG;
+        } else if (action == INPUT_CANCEL) {
+            ui->items_focus = ITEMS_FOCUS_CATALOG;
+        }
+    }
+}
+
 void ui_handle_input(UIState *ui, SaveData *save, InputAction action) {
     if (action == INPUT_TAB_PREV) {
         ui->active_tab = (ui->active_tab - 1 + TAB_COUNT) % TAB_COUNT;
@@ -295,6 +476,10 @@ void ui_handle_input(UIState *ui, SaveData *save, InputAction action) {
     }
     if (ui->active_tab == 4) {
         handle_buildings_input(ui, save, action);
+        return;
+    }
+    if (ui->active_tab == 5) {
+        handle_items_input(ui, action);
         return;
     }
 
@@ -382,7 +567,7 @@ static void render_saves_tab(UIState *ui, SDL_Renderer *renderer, const SaveData
             SDL_RenderDrawRect(renderer, &row);
         }
 
-        draw_text(renderer, ui->font_body, entry->label, row.x + 14, row.y + 8,
+        draw_text(renderer, ui->font_body, entry->label, row.x + 14, row.y + 9,
                   sel ? col_gold : col_text);
         draw_text(renderer, ui->font_small, is_current ? "[CHARGEE]" : entry->path,
                   row.x + 280, row.y + 11, is_current ? col_green : col_muted);
@@ -394,8 +579,8 @@ static void render_buildings_tab(UIState *ui, SDL_Renderer *renderer, const Save
     const int cell = 5;
     const int map_x = 34;
     const int map_y = 146;
-    const int map_w = FARM_WIDTH * cell;  /* 400 px */
-    const int map_h = FARM_HEIGHT * cell; /* 325 px */
+    const int map_w = FARM_WIDTH * cell;
+    const int map_h = FARM_HEIGHT * cell;
 
     SDL_Color col_gold   = { 248, 206, 102, 255 };
     SDL_Color col_text   = { 245, 236, 220, 255 };
@@ -403,7 +588,6 @@ static void render_buildings_tab(UIState *ui, SDL_Renderer *renderer, const Save
     SDL_Color col_green  = { 120, 225, 120, 255 };
     SDL_Color col_red    = { 235, 100, 100, 255 };
 
-    /* 1. Terrain de base + couche d'objets/arbres/cultures de la sauvegarde */
     for (int y = 0; y < FARM_HEIGHT; y++) {
         for (int x = 0; x < FARM_WIDTH; x++) {
             uint8_t t = STANDARD_FARM_GRID[y][x];
@@ -417,19 +601,18 @@ static void render_buildings_tab(UIState *ui, SDL_Renderer *renderer, const Save
                 SDL_SetRenderDrawColor(renderer, 46, 58, 72, 255);
             }
 
-            /* Superpose les éléments dynamiques de la sauvegarde */
             if (ov == OVERLAY_CROP) {
-                SDL_SetRenderDrawColor(renderer, 120, 84, 52, 255);   /* Cultures / terre labourée */
+                SDL_SetRenderDrawColor(renderer, 120, 84, 52, 255);
             } else if (ov == OVERLAY_TREE) {
-                SDL_SetRenderDrawColor(renderer, 42, 92, 38, 255);    /* Arbres */
+                SDL_SetRenderDrawColor(renderer, 42, 92, 38, 255);
             } else if (ov == OVERLAY_OTHER_OBJ) {
-                SDL_SetRenderDrawColor(renderer, 145, 138, 125, 255); /* Pierres / bois / clôtures */
+                SDL_SetRenderDrawColor(renderer, 145, 138, 125, 255);
             } else if (ov == OVERLAY_MACHINE) {
-                SDL_SetRenderDrawColor(renderer, 225, 130, 45, 255);  /* Machines */
+                SDL_SetRenderDrawColor(renderer, 225, 130, 45, 255);
             } else if (ov == OVERLAY_SPRINKLER) {
-                SDL_SetRenderDrawColor(renderer, 70, 215, 235, 255);  /* Arroseurs */
+                SDL_SetRenderDrawColor(renderer, 70, 215, 235, 255);
             } else if (ov == OVERLAY_CHEST) {
-                SDL_SetRenderDrawColor(renderer, 250, 215, 55, 255);  /* Coffres */
+                SDL_SetRenderDrawColor(renderer, 250, 215, 55, 255);
             }
 
             SDL_Rect tile_rect = { map_x + x * cell, map_y + y * cell, cell, cell };
@@ -441,14 +624,9 @@ static void render_buildings_tab(UIState *ui, SDL_Renderer *renderer, const Save
                         ? nth_active_building(save, ui->bld_existing_idx)
                         : -1;
 
-    /* 2. Bâtiments actifs sur la mini-carte */
     for (int i = 0; i < save->building_count; i++) {
         const BuildingEntry *b = &save->buildings[i];
-        if (b->is_deleted) {
-            continue;
-        }
-        /* Pendant un déplacement, on dessine le fantôme à la place de l'ancienne position */
-        if (ui->bld_mode == BLD_MODE_MANAGE_MOVE && i == selected_real) {
+        if (b->is_deleted || (ui->bld_mode == BLD_MODE_MANAGE_MOVE && i == selected_real)) {
             continue;
         }
         SDL_Rect br = {
@@ -458,20 +636,19 @@ static void render_buildings_tab(UIState *ui, SDL_Renderer *renderer, const Save
             b->tiles_high * cell
         };
         if (i == selected_real) {
-            SDL_SetRenderDrawColor(renderer, 248, 206, 102, 255); /* Sélectionné : doré */
+            SDL_SetRenderDrawColor(renderer, 248, 206, 102, 255);
         } else if (b->is_new) {
-            SDL_SetRenderDrawColor(renderer, 58, 195, 108, 255);  /* Nouveau : vert vif */
+            SDL_SetRenderDrawColor(renderer, 58, 195, 108, 255);
         } else if (b->is_moved) {
-            SDL_SetRenderDrawColor(renderer, 180, 120, 230, 255); /* Déplacé : violet */
+            SDL_SetRenderDrawColor(renderer, 180, 120, 230, 255);
         } else {
-            SDL_SetRenderDrawColor(renderer, 74, 146, 206, 255);  /* Existant : bleu */
+            SDL_SetRenderDrawColor(renderer, 74, 146, 206, 255);
         }
         SDL_RenderFillRect(renderer, &br);
         SDL_SetRenderDrawColor(renderer, 250, 250, 250, 255);
         SDL_RenderDrawRect(renderer, &br);
     }
 
-    /* 3. Curseur fantôme (ajout OU déplacement) */
     bool placing = (ui->bld_mode == BLD_MODE_ADD_PLACE || ui->bld_mode == BLD_MODE_MANAGE_MOVE);
     int ghost_w = 0, ghost_h = 0;
     bool valid_spot = false;
@@ -497,28 +674,21 @@ static void render_buildings_tab(UIState *ui, SDL_Renderer *renderer, const Save
             ghost_h * cell
         };
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-        if (valid_spot) {
-            SDL_SetRenderDrawColor(renderer, 80, 240, 100, 165);
-        } else {
-            SDL_SetRenderDrawColor(renderer, 240, 70, 70, 175);
-        }
+        SDL_SetRenderDrawColor(renderer, valid_spot ? 80 : 240, valid_spot ? 240 : 70, valid_spot ? 100 : 70, 170);
         SDL_RenderFillRect(renderer, &ghost);
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
         SDL_RenderDrawRect(renderer, &ghost);
     }
 
-    /* Cadre autour de la mini-carte */
     SDL_Rect map_border = { map_x - 1, map_y - 1, map_w + 2, map_h + 2 };
     SDL_SetRenderDrawColor(renderer, 248, 206, 102, 255);
     SDL_RenderDrawRect(renderer, &map_border);
 
-    /* 4. Panneau de droite */
     const int rx = 454;
     int active_count = save_data_active_building_count(save);
     bool is_add_mode = (ui->bld_mode == BLD_MODE_ADD_SELECT || ui->bld_mode == BLD_MODE_ADD_PLACE);
 
-    /* Switch visuel [Ajouter] / [Gerer existants] */
     SDL_Rect pill_add = { rx, 146, 224, 28 };
     SDL_Rect pill_mng = { rx + 234, 146, 236, 28 };
     SDL_SetRenderDrawColor(renderer, is_add_mode ? 150 : 62, is_add_mode ? 95 : 44, is_add_mode ? 42 : 34, 255);
@@ -610,10 +780,163 @@ static void render_buildings_tab(UIState *ui, SDL_Renderer *renderer, const Save
         draw_text(renderer, ui->font_small, "Fleches: Deplacer  |  Entree: Valider  |  Backspace: Annuler", rx, 326, col_muted);
     }
 
-    /* Légende de la mini-carte (bas du panneau droit) */
     draw_text(renderer, ui->font_small,
               "Carte: Bleu=Bat.  Jaune=Coffre  Cyan=Arros.  Orange=Mach.  Vert=Arbre",
               rx, 448, col_muted);
+}
+
+/*
+ * Rendu de l'onglet 5 : Interface Objets & Stockages
+ * - Bandeau supérieur : sélecteur de zone de stockage (Inventaire Joueur par défaut ou Coffre)
+ * - Panneau gauche : contenu (slots) de la zone sélectionnée
+ * - Panneau droit : catalogue filtrable par catégorie (Poissons, Minéraux, Cultures...) + quantité
+ */
+static void render_items_tab(UIState *ui, SDL_Renderer *renderer) {
+    SDL_Color col_gold  = { 248, 206, 102, 255 };
+    SDL_Color col_text  = { 245, 236, 220, 255 };
+    SDL_Color col_muted = { 185, 165, 145, 255 };
+    SDL_Color col_green = { 120, 225, 120, 255 };
+    SDL_Color col_cyan  = { 115, 215, 235, 255 };
+
+    bool focus_left  = (ui->items_focus == ITEMS_FOCUS_STORAGE);
+    bool focus_right = (ui->items_focus == ITEMS_FOCUS_CATALOG || ui->items_focus == ITEMS_FOCUS_QTY);
+
+    /* 1. Barre sélecteur de zone de stockage (haut du panneau) */
+    const UIPreviewStorage *st = &UI_PREVIEW_STORAGES[ui->items_storage_idx];
+    SDL_Rect storage_bar = { 34, 148, 892, 32 };
+    SDL_SetRenderDrawColor(renderer, focus_left ? 86 : 58, focus_left ? 58 : 42, focus_left ? 38 : 34, 255);
+    SDL_RenderFillRect(renderer, &storage_bar);
+    SDL_SetRenderDrawColor(renderer, focus_left ? 248 : 118, focus_left ? 206 : 82, focus_left ? 102 : 54, 255);
+    SDL_RenderDrawRect(renderer, &storage_bar);
+
+    char bar_txt[160];
+    snprintf(bar_txt, sizeof(bar_txt), "Zone de stockage (%d/%d) :   <  %s  >",
+             ui->items_storage_idx + 1, UI_PREVIEW_STORAGE_COUNT, st->label);
+    draw_text(renderer, ui->font_body, bar_txt, storage_bar.x + 14, storage_bar.y + 6,
+              focus_left ? col_gold : col_text);
+    draw_text(renderer, ui->font_small, "[Tab / Carre : changer panneau]",
+              storage_bar.x + 650, storage_bar.y + 8, col_muted);
+
+    /* 2. Panneau gauche : Contenu du stockage sélectionné */
+    SDL_Rect left_box = { 34, 188, 434, 282 };
+    SDL_SetRenderDrawColor(renderer, 42, 30, 24, 255);
+    SDL_RenderFillRect(renderer, &left_box);
+    SDL_SetRenderDrawColor(renderer, focus_left ? 248 : 96, focus_left ? 206 : 68, focus_left ? 102 : 48, 255);
+    SDL_RenderDrawRect(renderer, &left_box);
+
+    char left_hdr[96];
+    snprintf(left_hdr, sizeof(left_hdr), "Contenu (%d slots) - Slot #%02d",
+             st->slot_count, ui->items_slot_idx + 1);
+    draw_text(renderer, ui->font_small, left_hdr, left_box.x + 12, left_box.y + 8,
+              focus_left ? col_gold : col_muted);
+
+    const int visible_slots = 7;
+    int slot_start = clamp_int(ui->items_slot_idx - visible_slots / 2, 0, st->slot_count - visible_slots);
+    for (int i = 0; i < visible_slots; i++) {
+        int sidx = slot_start + i;
+        SDL_Rect srow = { left_box.x + 10, left_box.y + 32 + i * 31, left_box.w - 20, 27 };
+        bool sel = (focus_left && sidx == ui->items_slot_idx);
+
+        if (sel) {
+            SDL_SetRenderDrawColor(renderer, 96, 64, 40, 255);
+            SDL_RenderFillRect(renderer, &srow);
+            SDL_SetRenderDrawColor(renderer, 248, 206, 102, 255);
+            SDL_RenderDrawRect(renderer, &srow);
+        } else {
+            SDL_SetRenderDrawColor(renderer, 54, 39, 31, 255);
+            SDL_RenderFillRect(renderer, &srow);
+        }
+
+        const char *iname = (sidx < 6) ? st->slots[sidx] : "(Vide)";
+        int qty = (sidx < 6) ? st->stacks[sidx] : 0;
+
+        char slot_line[96];
+        if (qty > 0) {
+            snprintf(slot_line, sizeof(slot_line), "%02d. %s", sidx + 1, iname);
+        } else {
+            snprintf(slot_line, sizeof(slot_line), "%02d. (Vide)", sidx + 1);
+        }
+        draw_text(renderer, ui->font_small, slot_line, srow.x + 10, srow.y + 5,
+                  qty > 0 ? (sel ? col_gold : col_text) : col_muted);
+
+        if (qty > 0) {
+            char qbuf[24];
+            snprintf(qbuf, sizeof(qbuf), "x%d", qty);
+            draw_text(renderer, ui->font_small, qbuf, srow.x + 340, srow.y + 5, col_cyan);
+        }
+    }
+
+    draw_text(renderer, ui->font_small, "Gauche/Droite: Changer coffre  |  X: Retirer",
+              left_box.x + 12, left_box.y + 256, col_muted);
+
+    /* 3. Panneau droit : Catalogue d'objets à ajouter */
+    SDL_Rect right_box = { 480, 188, 446, 282 };
+    SDL_SetRenderDrawColor(renderer, 42, 30, 24, 255);
+    SDL_RenderFillRect(renderer, &right_box);
+    SDL_SetRenderDrawColor(renderer, focus_right ? 248 : 96, focus_right ? 206 : 68, focus_right ? 102 : 48, 255);
+    SDL_RenderDrawRect(renderer, &right_box);
+
+    /* Barre de catégorie */
+    SDL_Rect cat_bar = { right_box.x + 10, right_box.y + 8, right_box.w - 20, 26 };
+    SDL_SetRenderDrawColor(renderer, 66, 46, 34, 255);
+    SDL_RenderFillRect(renderer, &cat_bar);
+
+    int filtered = preview_catalog_filtered_count(ui->items_category_idx);
+    char cat_txt[96];
+    snprintf(cat_txt, sizeof(cat_txt), "Categorie : < %s >  (%d)",
+             ITEM_CAT_NAMES[ui->items_category_idx], filtered);
+    draw_text(renderer, ui->font_small, cat_txt, cat_bar.x + 10, cat_bar.y + 5,
+              focus_right ? col_gold : col_text);
+
+    /* Liste d'objets filtrée */
+    const int visible_cat = 6;
+    int cat_start = 0;
+    if (filtered > visible_cat) {
+        cat_start = clamp_int(ui->items_catalog_cursor - visible_cat / 2, 0, filtered - visible_cat);
+    }
+    int show_cat = filtered < visible_cat ? filtered : visible_cat;
+    for (int i = 0; i < show_cat; i++) {
+        int nth = cat_start + i;
+        int real_idx = preview_catalog_nth(ui->items_category_idx, nth);
+        const UIPreviewItem *it = &UI_PREVIEW_CATALOG[real_idx];
+        SDL_Rect crow = { right_box.x + 10, right_box.y + 42 + i * 30, right_box.w - 20, 26 };
+        bool sel = (focus_right && nth == ui->items_catalog_cursor);
+
+        if (sel) {
+            SDL_SetRenderDrawColor(renderer, 96, 64, 40, 255);
+            SDL_RenderFillRect(renderer, &crow);
+            SDL_SetRenderDrawColor(renderer, 248, 206, 102, 255);
+            SDL_RenderDrawRect(renderer, &crow);
+        }
+
+        draw_text(renderer, ui->font_small, it->name, crow.x + 10, crow.y + 5, sel ? col_gold : col_text);
+
+        char meta[48];
+        snprintf(meta, sizeof(meta), "[%s] %dg", ITEM_CAT_NAMES[it->category], it->price);
+        draw_text(renderer, ui->font_small, meta, crow.x + 255, crow.y + 5, col_muted);
+    }
+
+    /* Barre de quantité / confirmation en bas du panneau droit */
+    SDL_Rect qty_bar = { right_box.x + 10, right_box.y + 228, right_box.w - 20, 44 };
+    if (ui->items_focus == ITEMS_FOCUS_QTY) {
+        SDL_SetRenderDrawColor(renderer, 54, 92, 52, 255);
+        SDL_RenderFillRect(renderer, &qty_bar);
+        SDL_SetRenderDrawColor(renderer, 120, 225, 120, 255);
+        SDL_RenderDrawRect(renderer, &qty_bar);
+
+        char qline[128];
+        snprintf(qline, sizeof(qline), "Quantite : <  x%d  >   (Haut/Bas: +/-10)", ui->items_add_qty);
+        draw_text(renderer, ui->font_body, qline, qty_bar.x + 12, qty_bar.y + 4, col_gold);
+        draw_text(renderer, ui->font_small, "Entree/Croix: Confirmer l'ajout  |  Backspace/Rond: Annuler",
+                  qty_bar.x + 12, qty_bar.y + 24, col_green);
+    } else {
+        SDL_SetRenderDrawColor(renderer, 58, 42, 34, 255);
+        SDL_RenderFillRect(renderer, &qty_bar);
+        draw_text(renderer, ui->font_small, "Gauche/Droite: Categorie  |  Haut/Bas: Choisir objet",
+                  qty_bar.x + 12, qty_bar.y + 5, col_muted);
+        draw_text(renderer, ui->font_small, "Entree/Croix: Choisir quantite & Ajouter au stockage",
+                  qty_bar.x + 12, qty_bar.y + 23, col_green);
+    }
 }
 
 void ui_render(UIState *ui, SDL_Renderer *renderer, const SaveData *save) {
@@ -638,9 +961,9 @@ void ui_render(UIState *ui, SDL_Renderer *renderer, const SaveData *save) {
              save->farmer_name, save->farm_name, save->dirty ? " *" : "");
     draw_text(renderer, ui->font_small, subtitle, 560, 26, col_text);
 
-    /* 3. Barre de 5 onglets calés sur 960 px */
-    int tab_w = 174;
-    int tab_x = 25;
+    /* 3. Barre de 6 onglets calés sur 960 px */
+    int tab_w = 144;
+    int tab_x = 23;
     for (int i = 0; i < TAB_COUNT; i++) {
         SDL_Rect tab_rect = { tab_x + i * (tab_w + 10), 84, tab_w, 42 };
         if (i == ui->active_tab) {
@@ -649,7 +972,7 @@ void ui_render(UIState *ui, SDL_Renderer *renderer, const SaveData *save) {
             SDL_SetRenderDrawColor(renderer, 58, 42, 34, 255);
         }
         SDL_RenderFillRect(renderer, &tab_rect);
-        draw_text(renderer, ui->font_body, TAB_NAMES[i], tab_rect.x + 12, tab_rect.y + 10,
+        draw_text(renderer, ui->font_body, TAB_NAMES[i], tab_rect.x + 10, tab_rect.y + 11,
                   i == ui->active_tab ? col_gold : col_muted);
     }
 
@@ -664,6 +987,8 @@ void ui_render(UIState *ui, SDL_Renderer *renderer, const SaveData *save) {
         render_saves_tab(ui, renderer, save);
     } else if (ui->active_tab == 4) {
         render_buildings_tab(ui, renderer, save);
+    } else if (ui->active_tab == 5) {
+        render_items_tab(ui, renderer);
     } else {
         int rows = tab_row_count(ui->active_tab);
         for (int r = 0; r < rows; r++) {
@@ -681,7 +1006,7 @@ void ui_render(UIState *ui, SDL_Renderer *renderer, const SaveData *save) {
             char val_buf[64] = "";
             get_row_display(save, ui->active_tab, r, &label, val_buf, sizeof(val_buf));
 
-            draw_text(renderer, ui->font_body, label, row_rect.x + 20, row_rect.y + 12, col_text);
+            draw_text(renderer, ui->font_body, label, row_rect.x + 20, row_rect.y + 13, col_text);
 
             char decorated_val[80];
             if (selected) {
@@ -689,7 +1014,7 @@ void ui_render(UIState *ui, SDL_Renderer *renderer, const SaveData *save) {
             } else {
                 snprintf(decorated_val, sizeof(decorated_val), "%s", val_buf);
             }
-            draw_text(renderer, ui->font_body, decorated_val, row_rect.x + 560, row_rect.y + 12,
+            draw_text(renderer, ui->font_body, decorated_val, row_rect.x + 560, row_rect.y + 13,
                       selected ? col_gold : col_muted);
         }
     }
@@ -704,9 +1029,14 @@ void ui_render(UIState *ui, SDL_Renderer *renderer, const SaveData *save) {
     SDL_SetRenderDrawColor(renderer, 26, 18, 15, 255);
     SDL_RenderFillRect(renderer, &footer);
 
-    const char *help_text = (ui->active_tab == 4)
-        ? "Fleches: Deplacer  |  Entree: Valider  |  Tab/Carre: Mode  |  X/Tri: Suppr  |  Q/E: Onglets  |  F5: Sauver"
-        : "Haut/Bas: Naviguer  |  Gauche/Droite: Modifier  |  Entree: Charger  |  Q/E (L/R): Onglets  |  F5: Sauver";
+    const char *help_text;
+    if (ui->active_tab == 4) {
+        help_text = "Fleches: Deplacer  |  Entree: Valider  |  Tab/Carre: Mode  |  X/Tri: Suppr  |  Q/E: Onglets  |  F5: Sauver";
+    } else if (ui->active_tab == 5) {
+        help_text = "Tab/Carre: Stockage/Catalogue  |  Gauche/Droite: Coffre/Cat  |  Entree: Ajouter  |  X: Retirer  |  Q/E: Onglets";
+    } else {
+        help_text = "Haut/Bas: Naviguer  |  Gauche/Droite: Modifier  |  Entree: Charger  |  Q/E (L/R): Onglets  |  F5: Sauver";
+    }
     draw_text(renderer, ui->font_small, help_text, 24, SCREEN_HEIGHT - 27, col_muted);
 
     SDL_RenderPresent(renderer);
