@@ -12,45 +12,50 @@
 #include <SDL_ttf.h>
 #include <stdbool.h>
 
-/* Sous-mode actif dans l'onglet Batiments */
+/* Sous-mode actif dans l'onglet Bâtiments */
 typedef enum {
-    BLD_MODE_SELECT = 0, /* Choix du batiment dans le catalogue */
-    BLD_MODE_PLACE  = 1  /* Deplacement et pose du batiment sur la mini-carte */
+    BLD_MODE_ADD_SELECT  = 0, /* Choisir un nouveau bâtiment dans le catalogue */
+    BLD_MODE_ADD_PLACE   = 1, /* Placer le nouveau bâtiment sur la mini-carte */
+    BLD_MODE_MANAGE_LIST = 2, /* Parcourir les bâtiments existants (déplacer / supprimer) */
+    BLD_MODE_MANAGE_MOVE = 3  /* Déplacer le bâtiment existant sélectionné sur la carte */
 } BuildingMode;
 
 /*
- * Contient tout l'état interne de l'interface :
- * polices chargées, onglet actif, ligne sélectionnée, état du constructeur
- * de bâtiments et message temporaire.
+ * Contient tout l'état interne de l'interface.
  */
 typedef struct {
-    TTF_Font *font_title;   /* Police grande taille pour le titre (26 px) */
-    TTF_Font *font_body;    /* Police standard pour onglets et lignes (20 px) */
-    TTF_Font *font_small;   /* Police petite taille pour sous-titre et barre d'aide (15 px) */
+    TTF_Font *font_title;   /* Police titre (26 px) */
+    TTF_Font *font_body;    /* Police standard (18 px) */
+    TTF_Font *font_small;   /* Police petite (14 px) */
 
-    int active_tab;         /* Index de l'onglet actif (0: Joueur, 1: Compétences, 2: Ferme, 3: Bâtiments) */
-    int selected_row;       /* Index de la ligne actuellement sélectionnée dans l'onglet */
+    int active_tab;         /* 0: Sauvegardes, 1: Joueur, 2: Compétences, 3: Ferme, 4: Bâtiments */
+    int selected_row;       /* Ligne sélectionnée dans l'onglet actif */
 
-    /* État spécifique à l'onglet Bâtiments (tab == 3) */
-    BuildingMode bld_mode;  /* SELECT (catalogue) ou PLACE (curseur sur la carte) */
-    int bld_catalog_idx;    /* Index du bâtiment choisi dans BUILDING_CATALOG */
-    int cursor_x;           /* Position X du curseur de placement sur la ferme (0..79) */
-    int cursor_y;           /* Position Y du curseur de placement sur la ferme (0..64) */
+    /* Sélecteur de sauvegardes (tab == 0) */
+    SaveFileEntry save_files[MAX_SAVE_FILES];
+    int save_file_count;
 
-    char status_msg[128];   /* Message de confirmation/erreur affiché en bas de l'écran */
-    Uint32 status_until_ms; /* Timestamp SDL (en ms) jusqu'auquel afficher status_msg */
+    /* Constructeur / gestionnaire de bâtiments (tab == 4) */
+    BuildingMode bld_mode;
+    int bld_catalog_idx;    /* Index dans BUILDING_CATALOG (0..15) */
+    int bld_existing_idx;   /* Index dans save->buildings[] pour déplacer/supprimer */
+    int cursor_x;           /* Curseur X sur la ferme (0..79) */
+    int cursor_y;           /* Curseur Y sur la ferme (0..64) */
+
+    char status_msg[128];   /* Message temporaire en bas de l'écran */
+    Uint32 status_until_ms; /* Fin d'affichage de status_msg */
 } UIState;
 
-/* Charge les 3 tailles de police depuis `font_path` et initialise `ui`. Retourne true si succès. */
+/* Charge les polices, scanne les sauvegardes et initialise `ui`. */
 bool ui_init(UIState *ui, const char *font_path);
 
 /* Libère les polices chargées par `ui_init`. */
 void ui_destroy(UIState *ui);
 
-/* Traite une action utilisateur (navigation, changement d'onglet, édition, pose bâtiment, sauvegarde). */
+/* Traite une action utilisateur pour tous les onglets. */
 void ui_handle_input(UIState *ui, SaveData *save, InputAction action);
 
-/* Dessine l'ensemble de l'interface dans le renderer SDL (résolution 960x544). */
+/* Dessine l'ensemble de l'interface en 960x544. */
 void ui_render(UIState *ui, SDL_Renderer *renderer, const SaveData *save);
 
 #endif
